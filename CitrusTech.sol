@@ -1,181 +1,342 @@
 /**
- *Submitted for verification at BscScan.com on 2021-07-05
+ *Submitted for verification at BscScan.com on 2021-07-24
 */
 
 // SPDX-License-Identifier: none
-pragma solidity 0.8.4;
+pragma solidity ^0.8.4;
 
-contract Owned {
-    modifier onlyOwner() {
-        require(msg.sender == owner);
-        _;
-    }
-    address public owner;
-   
-    function changeOwnership(address payable _newOwner) public onlyOwner {
-        owner = _newOwner;
-    }
-    
+interface AggregatorV3Interface {
+
+  function decimals() external view returns (uint);
+  function description() external view returns (string memory);
+  function version() external view returns (uint);
+
+  // getRoundData and latestRoundData should both raise "No data present"
+  // if they do not have data to report, instead of returning unset values
+  // which could be misinterpreted as actual reported values.
+  function getRoundData(uint80 _roundId)
+    external
+    view
+    returns (
+      uint roundId,
+      uint answer,
+      uint startedAt,
+      uint updatedAt,
+      uint answeredInRound
+    );
+  function latestRoundData()
+    external
+    view
+    returns (
+      uint roundId,
+      uint answer,
+      uint startedAt,
+      uint updatedAt,
+      uint answeredInRound
+    );
+
 }
 
-interface BEP {
+contract PriceConsumerV3 {
 
-    function totalSupply() external view returns (uint256);
-    function balanceOf(address account) external view returns (uint256);
-    function transfer(address recipient, uint256 amount) external returns (bool);
-    function allowance(address owner, address spender) external view returns (uint256);
-    function approve(address spender, uint256 amount) external returns (bool);
-    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
-    event Transfer(address indexed from, address indexed to, uint256 value);
-    event Approval(address indexed owner, address indexed spender, uint256 value);
-}
-
-contract BEP20 {
-    string public symbol;
-    string public name;
-    uint8 public decimals;
-    uint256 public totalSupply;
-    mapping (address=>uint256) balances;
-    mapping (address=>mapping (address=>uint256)) allowed;
-    event Transfer(address indexed _from, address indexed _to, uint256 _value);
-    event Approval(address indexed _owner, address indexed _spender, uint256 _value);
-    
-    function balanceOf(address _owner) view public returns (uint256 balance) {return balances[_owner];}
-    
-    function transfer(address _to, uint256 _amount) public returns (bool success) {
-        require (balances[msg.sender]>=_amount&&_amount>0&&balances[_to]+_amount>balances[_to]);
-        balances[msg.sender]-=_amount;
-        balances[_to]+=_amount;
-        emit Transfer(msg.sender,_to,_amount);
-        return true;
-    }
-  
-    function transferFrom(address _from,address _to,uint256 _amount) public returns (bool success) {
-        require (balances[_from]>=_amount&&allowed[_from][msg.sender]>=_amount&&_amount>0&&balances[_to]+_amount>balances[_to]);
-        balances[_from]-=_amount;
-        allowed[_from][msg.sender]-=_amount;
-        balances[_to]+=_amount;
-        emit Transfer(_from, _to, _amount);
-        return true;
-    }
-  
-    function approve(address _spender, uint256 _amount) public returns (bool success) {
-        allowed[msg.sender][_spender]=_amount;
-        emit Approval(msg.sender, _spender, _amount);
-        return true;
-    }
-    
-    function allowance(address _owner, address _spender) view public returns (uint256 remaining) {
-      return allowed[_owner][_spender];
-    }
-    
-    function _mint(address account, uint256 amount) internal virtual {
-        require(account != address(0), "BEP20: mint to the zero address");
-
-        _beforeTokenTransfer(address(0), account, amount);
-
-        totalSupply += amount;
-        balances[account] += amount;
-        emit Transfer(address(0), account, amount);
-    }
-    
-    
-     function _burn(address account, uint256 amount) internal virtual {
-        require(account != address(0), "BEP20: burn from the zero address");
-
-        _beforeTokenTransfer(account, address(0), amount);
-
-        uint256 accountBalance = balances[account];
-        require(accountBalance >= amount, "BEP20: burn amount exceeds balance");
-        balances[account] = accountBalance - amount;
-        totalSupply -= amount;
-
-        emit Transfer(account, address(0), amount);
-    }
-    function _beforeTokenTransfer(address from, address to, uint256 amount) internal virtual { }
-}
-
-contract TimeLock is Owned, BEP20 {
-    
-    struct LockedAccounts {
-        address account;
-        uint amount;
-        uint time;
-        Locked[] locked;
-    }
-    
-    struct Locked {
-        uint time;
-        uint amount;
-        uint lockedAt;
-    }
-    
-    mapping(address => LockedAccounts) lock;
-    
-    function timelock(address _lockAccount, uint time, uint amount) public onlyOwner returns (bool) {
-        require(amount > 0, "TimeLock: Amount cannot be zero");
-        transfer(address(this), amount);
-        lock[_lockAccount].account = _lockAccount;
-        lock[_lockAccount].amount = amount;
-        lock[_lockAccount].time = time;
-        lock[_lockAccount].locked.push(Locked(time, amount, block.timestamp));
-        return true;
-    }
-    
-    function release() public returns (bool) {
-        LockedAccounts storage lockedAccount = lock[msg.sender];
-        
-        for(uint i = 0; i < lockedAccount.locked.length; i++) {
-            Locked storage loc = lockedAccount.locked[i];
-            require(block.timestamp >= (loc.time + loc.lockedAt), "TimeLock: Release time not reached");
-            uint amount = loc.amount;
-            BEP(address(this)).transfer(msg.sender, amount);
-            loc.amount = 0;
-            loc.time = 0;
-            loc.lockedAt = 0;
-        }
-        return true;
-    }
-    
-    function lockedAccountDetails(address user) public view returns (uint[] memory, uint[] memory, uint[] memory, uint[] memory, uint) {
-        uint lockedLength = lock[user].locked.length;
-        uint[] memory lockedAmounts = new uint[](lockedLength);
-        uint[] memory lockTimes = new uint[](lockedLength);
-        uint[] memory lockedAt = new uint[](lockedLength);
-        uint[] memory totalLockTime = new uint[](lockedLength);
-        uint currentTime = block.timestamp;
-        
-        
-        for(uint i = 0; i < lockedLength; i++) {
-            lockedAmounts[i] = lock[user].locked[i].amount;
-            lockTimes[i] = lock[user].locked[i].time;
-            lockedAt[i] = lock[user].locked[i].lockedAt;
-            totalLockTime[i] = lock[user].locked[i].time + lock[user].locked[i].lockedAt;
-        }
-        return(lockedAmounts, lockTimes, lockedAt, totalLockTime, currentTime);
-    }
-}
-
-contract Citrus  is TimeLock {
+    AggregatorV3Interface internal priceFeed;
 
     constructor() {
-        symbol = "CTS";
-        name = "Citrus";
-        decimals = 18;                                    
-        totalSupply = 383000000 * 10**18;           
-       
-        owner = msg.sender;
-        balances[owner] = totalSupply;
-    }
-    
-    function mint(address to, uint amount) external {
-        require(msg.sender == owner, 'only admin');
-        _mint(to, amount);
+        priceFeed = AggregatorV3Interface(0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE);
     }
 
-    function burn(address from, uint amount) external {
-        require(msg.sender == owner, 'only admin');
-        _burn(from, amount);
+
+    function getThePrice() public view returns (uint) {
+        (
+            uint roundID, 
+            uint price,
+            uint startedAt,
+            uint timeStamp,
+            uint answeredInRound
+        ) = priceFeed.latestRoundData();
+        return price;
     }
-   
+}
+
+interface BEP20 {
+             function totalSupply() external view returns (uint theTotalSupply);
+             function balanceOf(address _owner) external view returns (uint balance);
+             function transfer(address _to, uint _value) external returns (bool success);
+             function transferFrom(address _from, address _to, uint _value) external returns (bool success);
+             function approve(address _spender, uint _value) external returns (bool success);
+             function allowance(address _owner, address _spender) external view returns (uint remaining);
+             event Transfer(address indexed _from, address indexed _to, uint _value);
+             event Approval(address indexed _owner, address indexed _spender, uint _value);
+}
+
+contract PrivateSale {
+    
+    PriceConsumerV3 priceConsumerV3 = new PriceConsumerV3();
+    uint priceOfBNB = priceConsumerV3.getThePrice();
+    
+    struct Buyer{
+        address referer;
+        uint tokensBought;
+        bool registered;
+    }
+    
+    struct Referral{
+        bool refReg;
+        uint referred;
+        address[] referredUsers;
+    }
+    
+    struct Scratch{
+        uint[] tokenAmt;
+        uint[] buyAt;
+        bool claimed;
+    }
+    
+    address public owner = msg.sender;
+    address private tokenAddr = 0xAe67Cf598a349aFff89f6045108c6C1850f82839;
+    address private contractAddr = address(this);
+    uint buyPrice;
+    uint bonusPercent;
+    uint startTime = 0;
+    uint scratchAmount = 0;
+    uint minimumTokenForScratch = 0;
+    
+    
+    mapping(address => Buyer) buyer;
+    mapping(address => Scratch) scratch;
+    mapping(address => Referral) ref;
+    
+    event Received(address, uint);
+    event TokensBought(address, uint);
+    event OwnershipTransferred(address);
+    event Airdrop(address[], uint);
+    
+    // Set Start Time
+    function setStartTime(uint time_) public {
+        require(msg.sender == owner, "Only owner");
+        startTime = time_;
+    }
+    
+    // BUY TOKEN & Referral Reward
+    function buyToken(address referer) public payable returns(bool) {
+        
+        uint amount = msg.value * priceOfBNB / 10000;
+        buyPrice = buyPrice;
+        
+        BEP20 token = BEP20(tokenAddr);
+        
+        require(startTime > 0, "Start time not defined");
+        require(block.timestamp > startTime, "Private Sale not started yet");
+        require(token.balanceOf(contractAddr) > 0, "Not enough balance on contract");
+        require(msg.value > 0, "Zero value");
+        require(buyPrice != 0, "Buy price not set");
+        
+        uint tokens;
+        uint bonus;
+        
+        tokens = amount / buyPrice / 100;
+        token.transfer(msg.sender, tokens);
+        
+        if(bonusPercent == 0){
+            bonus = 0;
+        }
+        else if(bonusPercent != 0){
+            bonus = tokens * bonusPercent / 100;
+            token.transfer(msg.sender, bonus);
+        }
+        
+        refReward(referer, tokens);
+
+        buyer[msg.sender].tokensBought += tokens;
+        buyer[msg.sender].registered = true;
+        if(buyer[msg.sender].referer == address(0)){
+            buyer[msg.sender].referer = referer;
+        }
+
+        scratch[msg.sender].tokenAmt.push(tokens);
+        scratch[msg.sender].buyAt.push(block.timestamp);
+        scratch[msg.sender].claimed = false;
+        
+        emit TokensBought(msg.sender, tokens);
+        return true;
+    }
+    
+    // Set Buy Price
+    function setBuyPrice(uint price) public returns(bool) {
+        require(msg.sender == owner,"Only owner");
+        buyPrice = price;
+        return true;
+    }
+    
+    // Set bonus percent
+    function setBonus(uint bonus) public returns(bool) {
+        require(msg.sender == owner, "Only owner");
+        bonusPercent = bonus;
+        return true;
+    }
+    
+    // Referral Reward
+    function refReward(address _ref, uint _amt) internal {
+        
+        uint referralReward;
+        BEP20 token = BEP20(tokenAddr);
+        
+        if(!buyer[_ref].registered){
+            referralReward = 0;
+        }
+        else{
+            referralReward = _amt * 5 / 100;
+            token.transfer(_ref, referralReward);
+        }
+        
+        if(!ref[_ref].refReg){
+            ref[_ref].refReg = true;
+            ref[_ref].referred += 1;
+            ref[_ref].referredUsers.push(msg.sender);
+        }
+        else if(ref[_ref].refReg == true){
+            ref[_ref].referred += 1;
+            ref[_ref].referredUsers.push(msg.sender);
+        }
+            
+    }
+    
+    // View Buy Price
+    function viewPrice() public view returns(uint){
+        return buyPrice;
+    }
+    
+    // Set minimum token limit for Scratch
+    function minTokenForScratch(uint amount) public {
+        require(msg.sender == owner, "Only owner");
+        amount = amount * 10**18;
+        minimumTokenForScratch = amount;
+    }
+    
+    // View minimum token required for Scratch
+    function viewMinLimit() public view returns(uint) {
+        return minimumTokenForScratch;
+    }
+    
+    // Set Scratch Amount
+    function setScratchAmount(uint amount) public {
+        require(msg.sender == owner, "Only owner");
+        scratchAmount = amount * 10**18;
+    }
+     
+    // View scratch amount
+    function viewScratchAmount() public view returns(uint) {
+        return scratchAmount;
+    }
+    
+    // Claim Scratch Coupon tokens
+    function claim() public returns (bool) {
+        require(scratch[msg.sender].claimed == false, "User has already claimed tokens");
+        require(minimumTokenForScratch != 0, "Minimum limit not set");
+        require(buyer[msg.sender].tokensBought > minimumTokenForScratch, "Not eligible for scratch");
+        require(scratchAmount != 0, "Scratch amount not set");
+        BEP20 token = BEP20(tokenAddr);
+        token.transfer(msg.sender, scratchAmount);
+        scratch[msg.sender].claimed = true;
+        return true;
+    }
+    
+    // Update buyer Details
+    function updateBuyerDetails(address user,
+    address[] memory _referrals,
+    address _referer,
+    uint _tokensBought,
+    uint[] memory _tokenBuy,
+    uint[] memory _buyTime,
+    bool _scratch
+    )
+    public returns (bool){
+        require(msg.sender == owner, "Only owner");
+        buyer[user].tokensBought = _tokensBought;
+        buyer[user].registered = true;
+        if(buyer[user].referer == address(0)){
+            buyer[user].referer = _referer;
+        }
+        
+        for(uint i = 0; i < _referrals.length; i++){
+            ref[user].referredUsers.push(_referrals[i]);
+        }
+        
+        for(uint j = 0; j < _tokenBuy.length; j++){
+            scratch[user].tokenAmt.push(_tokenBuy[j]);
+            scratch[user].buyAt.push(_buyTime[j]);
+            scratch[user].claimed = _scratch;
+        }
+        
+        return true;
+    }
+    
+    // Show Buyer Details
+    function buyerDetails(address user) public view returns(bool, address, uint, uint[] memory, uint[] memory, bool){
+        bool reg = buyer[user].registered;
+        address referer = buyer[user].referer;
+        uint totalTokensBought = buyer[user].tokensBought;
+        uint[] memory tokensBought = new uint[](scratch[user].tokenAmt.length);
+        uint[] memory buyTime = new uint[](scratch[user].tokenAmt.length);
+        
+        for(uint i = 0; i< scratch[user].tokenAmt.length; i++){
+            tokensBought[i] = scratch[user].tokenAmt[i];
+            buyTime[i] = scratch[user].buyAt[i];
+        }
+        
+        bool claimStatus = scratch[user].claimed;
+        
+        return (reg, referer, totalTokensBought, tokensBought, buyTime, claimStatus);
+    }
+    
+    // View Current Bonus
+    function viewBonusPercent() public view returns (uint) {
+        return bonusPercent;
+    }
+    
+    // Show referred users
+    function referred(address user) public view returns(uint, address[] memory){
+        uint refNum = ref[user].referred;
+        address[] memory users = new address[](ref[user].referredUsers.length);
+        
+        for(uint i = 0; i < ref[user].referredUsers.length; i++){
+            users = ref[user].referredUsers; 
+        }
+        
+        return (refNum, users);
+    }
+    
+    // Show USD Price of 1 BNB
+    function usdPrice() external view returns(uint) {
+        uint Amount = priceOfBNB;
+        return Amount/100000000;
+    }
+    
+    // Owner Token Withdraw    
+    function withdrawToken(address tokenAddress, address to, uint amount) public returns(bool) {
+        require(msg.sender == owner);
+        BEP20 token = BEP20(tokenAddress);
+        token.transfer(to, amount);
+        return true;
+    }
+    
+    // Owner BNB Withdraw
+    function withdrawBNB(address payable to, uint amount) public returns(bool) {
+        require(msg.sender == owner);
+        to.transfer(amount);
+        return true;
+    }
+    
+    // Ownership Transfer    
+    function transferOwnership(address to) public returns(bool) {
+        require(msg.sender == owner);
+        owner = to;
+        emit OwnershipTransferred(to);
+        return true;
+    }
+    
+    // Fallback
+    receive() external payable {
+        emit Received(msg.sender, msg.value);
+    }
 }
